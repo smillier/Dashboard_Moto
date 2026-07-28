@@ -1,0 +1,44 @@
+# Built/verified against ESP-IDF 5.5.4
+
+# --- Target ---
+CONFIG_IDF_TARGET="esp32c6"
+
+# Console over the ESP32-C6 SuperMini's native USB-Serial-JTAG port.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# --- Bluetooth / NimBLE ---
+# ESP32-C6 only supports the NimBLE host in ESP-IDF (no Bluedroid).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+
+# This firmware is central-only for all three peers (RaceBox + GoPro +
+# heart rate monitor): it connects out, it never advertises itself.
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
+
+# Three simultaneous outbound connections: RaceBox, GoPro, heart rate
+# monitor. CCCDs: RaceBox subscribes to 1 characteristic, GoPro up to 3
+# (command/settings/query responses), heart rate monitor 1 - 8 gives
+# headroom for all three (5 needed).
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+CONFIG_BT_NIMBLE_MAX_CCCDS=8
+
+# Security / bonding - only the GoPro connection actually calls
+# ble_gap_security_initiate(); the RaceBox connection never requests
+# security and is unaffected by these being enabled.
+# Legacy Pairing (not LE Secure Connections) - confirmed necessary for
+# the GoPro to complete bonding instead of terminating the connection on
+# security request. See ble_manager.cpp for details.
+CONFIG_BT_NIMBLE_SM_LEGACY=y
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_MAX_BONDS=4
+
+# Persist bonding keys (LTK/IRK) in NVS so we don't have to re-pair the
+# GoPro every boot.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# --- Logging ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
