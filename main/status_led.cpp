@@ -84,6 +84,27 @@ void racebox_color(int64_t now, uint8_t* r, uint8_t* g, uint8_t* b) {
     }
 }
 
+// ---- pixel 2: Heart Rate Monitor -------------------------------------------
+bool g_hr_connected = false;
+int64_t g_hr_last_toggle_us = 0;
+bool g_hr_blink_on = true;
+
+void heart_rate_color(int64_t now, uint8_t* r, uint8_t* g, uint8_t* b) {
+    *r = *g = *b = 0;
+
+    advance_blink(g_hr_connected ? 0 : kSlowBlinkUs, now, &g_hr_last_toggle_us, &g_hr_blink_on);
+
+    if (!g_hr_blink_on) {
+        return;
+    }
+
+    if (g_hr_connected) {
+        *g = kBrightness; // green, solid
+    } else {
+        *b = kBrightness; // blue, slow blink (looking for the HRM over BLE)
+    }
+}
+
 void gopro_color(int64_t now, uint8_t* r, uint8_t* g, uint8_t* b) {
     *r = *g = *b = 0;
 
@@ -147,6 +168,14 @@ void status_led::set_gopro_state(conn_state_t conn, bool recording) {
     }
 }
 
+void status_led::set_heart_rate_connected(bool connected) {
+    if (connected != g_hr_connected) {
+        g_hr_connected = connected;
+        g_hr_blink_on = true;
+        g_hr_last_toggle_us = esp_timer_get_time();
+    }
+}
+
 void status_led::tick() {
     if (g_strip == nullptr) {
         return;
@@ -160,6 +189,9 @@ void status_led::tick() {
 
     gopro_color(now, &r, &g, &b);
     led_strip_set_pixel(g_strip, kGoProLedIndex, r, g, b);
+
+    heart_rate_color(now, &r, &g, &b);
+    led_strip_set_pixel(g_strip, kHeartRateLedIndex, r, g, b);
 
     led_strip_refresh(g_strip);
 }

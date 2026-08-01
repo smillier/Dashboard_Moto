@@ -62,7 +62,12 @@ extern "C" void app_main(void) {
     for (;;) {
         status_led::set_racebox_state(racebox_ble::state());
         status_led::set_gopro_state(app_state_get_conn(), app_state_get_recording());
+        status_led::set_heart_rate_connected(heart_rate_ble_is_connected());
         status_led::tick();
+
+        oled_display::set_racebox_state(racebox_ble::state());
+        oled_display::set_gopro_state(app_state_get_conn());
+        oled_display::set_heart_rate_connected(heart_rate_ble_is_connected());
 
         uint16_t bpm = 0;
         const bool hr_valid = heart_rate_ble_get_bpm(&bpm);

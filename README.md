@@ -10,8 +10,10 @@ SuperMini** board that runs three independent BLE-central roles at once:
 3. Connects to a standard **BLE Heart Rate Monitor** (chest strap / sports
    watch, GATT Heart Rate service `0x180D`) and shows the live bpm reading.
 
-RaceBox and GoPro status is shown on a **2-pixel WS2812 RGB bar** (pixel 0 =
-RaceBox, pixel 1 = GoPro); heart rate is shown as large digits on a
+RaceBox, GoPro and heart-rate-monitor connection status is shown on a
+**3-pixel WS2812 RGB bar** (pixel 0 = RaceBox, pixel 1 = GoPro, pixel 2 =
+heart rate monitor); the heart rate reading itself is shown as large digits
+(with small top-strip connection icons for all three devices) on a
 **0.96" SSD1306 128x64 I2C OLED**.
 
 This merges [ESP32C6_RaceBox](https://github.com/smillier/ESP32C6_RaceBox)
@@ -19,14 +21,14 @@ and [GoPro_ESP32C6_Remote](https://github.com/smillier/GoPro_ESP32C6_Remote)
 into one firmware. Both were already central-only NimBLE apps with no
 overlapping GPIOs, so the only real merge work was combining their two
 independent BLE scan loops into one shared scanner (only one `ble_gap_disc`
-can run at a time) and moving from a single-pixel status LED to a 2-pixel
+can run at a time) and moving from a single-pixel status LED to a 3-pixel
 bar.
 
 ## Hardware
 
 | Function                            | GPIO |
 |---------------------------------------|------|
-| 2-LED WS2812 RGB bar (status)          | 8    |
+| 3-LED WS2812 RGB bar (status)          | 8    |
 | RaceBox recording toggle (BOOT button) | 9    |
 | GoPro shutter (start/stop)             | 2    |
 | GoPro power / sleep                    | 3    |
@@ -36,7 +38,7 @@ bar.
 | OLED SCL (heart rate display)          | 19   |
 
 The RGB bar's data line replaces the SuperMini's onboard single WS2812 pad
-(GPIO8): it's the same protocol, just 2 pixels chained instead of 1. The
+(GPIO8): it's the same protocol, just 3 pixels chained instead of 1. The
 OLED is wired to this board's silkscreen-labeled I2C pins (SDA=GPIO20,
 SCL=GPIO19) - I2C only needs 2 GPIOs, so no IO expander is needed even
 though the board is otherwise fairly pin-constrained. All pins are
@@ -73,9 +75,14 @@ master driver (`driver` component), no extra dependency needed.
   `heart_rate_ble_matches()` (service `0x180D`); whichever matches gets
   connected, and that connection's GAP events (GATT discovery,
   subscription, bonding, disconnect) are then handled entirely by that
-  device's own module. The scan resumes automatically whenever a connection
-  attempt fails or a device disconnects, and stops once all three are
-  connected.
+  device's own module. Only one scan can run at a time, so it's cancelled
+  the instant any advertisement matches; it's then resumed immediately once
+  that connection attempt finishes (success or failure), so the other two
+  peers keep being searched for independently of whether this one is
+  present. The scan resumes automatically whenever a connection attempt
+  finishes, fails, or a device disconnects, and stops once all three are
+  connected - so any subset of the three devices being absent or slow to
+  appear never blocks the others from connecting.
 - **RaceBox**: once connected, subscribes to the UART service and queries
   recording status (`0xFF 0x22`), unlocking memory security if configured
   (`0xFF 0x30`). The BOOT button toggles recording (`0xFF 0x25`); state
@@ -91,7 +98,9 @@ master driver (`driver` component), no extra dependency needed.
   characteristic (`0x2A37`) - no bonding needed. Each notification is
   parsed per the GATT Heart Rate Measurement format (bpm value, either
   8-bit or 16-bit depending on a flag byte); energy-expended and
-  RR-interval fields, if present, are parsed past but not used.
+  RR-interval fields, if present, are parsed past but not used. Each new
+  bpm value is also logged (`heart_rate_ble: Heart rate: N bpm`) so it can
+  be watched live over `idf.py monitor` without needing the OLED.
 
 ## LED color code
 
@@ -115,12 +124,23 @@ master driver (`driver` component), no extra dependency needed.
 | Ready                      | Solid green            |
 | Recording in progress      | Red, blinking (overrides connection color) |
 
+**Pixel 2 - Heart rate monitor:**
+
+| State                                | Color / pattern |
+|----------------------------------------|------------------|
+| Searching for the heart rate monitor   | Blue, slow blink |
+| Connected                              | Solid green      |
+
 ## Heart rate OLED
 
-Large centered digits showing the current bpm reading, or `--` if no
-heart rate monitor is connected yet (or no valid notification has arrived
-since connecting). Refreshes when the value changes, with a 250ms safety
-refresh floor so it never stays stale.
+Top strip: three small connection-status icons (RaceBox, GoPro, heart rate
+monitor, left to right), each with a status dot below it - solid when
+connected, slow-blinking while scanning, fast-blinking while connecting
+(mirrors the LED bar's blink semantics). Below that: large centered digits
+showing the current bpm reading, or `--` if no heart rate monitor is
+connected yet (or no valid notification has arrived since connecting).
+Refreshes when a value or connection state changes, with a 100ms safety
+refresh floor so blinking icons stay smooth and nothing stays stale.
 
 ## Button behavior
 
@@ -156,7 +176,8 @@ refresh floor so it never stays stale.
   notify on `0x2A37` isn't handled (no bonding is requested for this
   connection). Most consumer chest straps (Polar, Wahoo, etc.) don't
   require this.
-- All three devices connect sequentially (whichever advertises first), not
-  concurrently - the shared scanner cancels scanning while a connection is
-  being established, matching how each original project already behaved
-  for its single peer.
+- Only one BLE scan can run at a time, so it's briefly cancelled while each
+  connection attempt is in progress - but it resumes immediately once that
+  attempt finishes (success or failure), so all three devices still connect
+  independently of each other and of the order they advertise in (see
+  "How it works" above).

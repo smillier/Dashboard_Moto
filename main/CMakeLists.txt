@@ -12,5 +12,5 @@ idf_component_register(
         "app_state.c"
         "buttons.c"
     INCLUDE_DIRS "."
-    REQUIRES bt driver esp_timer nvs_flash
+    REQUIRES bt driver esp_driver_i2c esp_timer nvs_flash
 )

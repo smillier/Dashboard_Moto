@@ -238,7 +238,13 @@ static void gopro_discover_next_dsc(void)
         return;
     }
 
-    int rc = ble_gattc_disc_all_dscs(s_conn_handle, start, end, gopro_on_dsc_disc, NULL);
+    /* ble_gattc_disc_all_dscs's start_handle param is the characteristic
+     * VALUE handle itself (NimBLE starts the real ATT search at
+     * start_handle+1 internally), whereas `start` here already IS
+     * val_handle+1 (it doubles as the CCCD handle in the shortcut above) -
+     * so back off by one or the real search would begin at `start+1`,
+     * skipping straight past the actual CCCD. */
+    int rc = ble_gattc_disc_all_dscs(s_conn_handle, start - 1, end, gopro_on_dsc_disc, NULL);
     if (rc != 0) {
         ESP_LOGW(TAG, "disc_all_dscs failed rc=%d, skipping chr %d", rc, s_dsc_target);
         s_dsc_target++;
@@ -394,6 +400,10 @@ static int gopro_gap_event(struct ble_gap_event *event, void *arg)
             ESP_LOGI(TAG, "Connected. Discovering GATT database (bonding requested after)...");
             app_state_set_conn(CONN_STATE_CONNECTING);
             s_conn_handle = event->connect.conn_handle;
+            // Connecting to this peer cancelled the shared scan; resume it
+            // now so the RaceBox/heart-rate-monitor scan keeps going
+            // independently of this GoPro connection's own progress.
+            ble_manager_resume_scan_if_needed();
             gopro_start_discovery();
         } else {
             ESP_LOGE(TAG, "Connection failed, status=%d", event->connect.status);

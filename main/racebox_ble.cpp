@@ -231,7 +231,12 @@ int on_chr_disc(uint16_t conn_handle, const struct ble_gatt_error* error, const 
         return 0;
     }
 
-    const int rc = ble_gattc_disc_all_dscs(g_conn_handle, g_tx_val_handle + 1, g_svc_end_handle, on_dsc_disc, nullptr);
+    // ble_gattc_disc_all_dscs's start_handle is the characteristic VALUE
+    // handle itself (NimBLE starts the real ATT search at start_handle+1
+    // internally) - passing val_handle+1 here would skip straight past the
+    // CCCD, which normally sits at val_handle+1, and search from
+    // val_handle+2 instead.
+    const int rc = ble_gattc_disc_all_dscs(g_conn_handle, g_tx_val_handle, g_svc_end_handle, on_dsc_disc, nullptr);
     if (rc != 0) {
         ble_gap_terminate(g_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
     }
@@ -273,6 +278,11 @@ int gap_event_handler(struct ble_gap_event* event, void* arg) {
             g_conn_handle = event->connect.conn_handle;
             reset_connection_state();
             g_state = RaceBoxState::CONNECTING;
+
+            // Connecting to this peer cancelled the shared scan; resume it
+            // now so the GoPro/heart-rate-monitor scan keeps going
+            // independently of whether this RaceBox connection succeeds.
+            ble_manager_resume_scan_if_needed();
 
             const int rc = ble_gattc_disc_svc_by_uuid(g_conn_handle, &kUartServiceUuid.u, on_svc_disc, nullptr);
             if (rc != 0) {

@@ -17,10 +17,12 @@ constexpr int kWidth = 128;
 constexpr int kHeight = 64;
 constexpr int kPages = kHeight / 8; // SSD1306 page addressing: 8 vertical px/page
 
-// Safety refresh interval even if nothing changed, so a display that
-// missed an update (e.g. power-on before the first heart rate reading)
-// never stays stale forever.
-constexpr int64_t kMinRefreshIntervalUs = 250 * 1000;
+// Also doubles as the blink-phase sampling rate for the connection-status
+// dots (see IconState), so a display that missed an update (e.g. power-on
+// before the first heart rate reading) never stays stale forever, and
+// blinking dots stay reasonably smooth without redrawing on every
+// main-loop tick.
+constexpr int64_t kMinRefreshIntervalUs = 100 * 1000;
 
 i2c_master_bus_handle_t g_bus = nullptr;
 i2c_master_dev_handle_t g_dev = nullptr;
@@ -30,6 +32,31 @@ bool g_last_valid = false;
 uint16_t g_last_bpm = 0;
 bool g_dirty = true;
 int64_t g_last_refresh_us = 0;
+
+// ---- top-strip connection-status icons -------------------------------
+// Generic three-tier status, independent of each BLE module's own state
+// type; set_racebox_state()/set_gopro_state()/set_heart_rate_connected()
+// each map their argument down to this before storing it.
+enum class IconState { SCANNING, CONNECTING, CONNECTED };
+
+IconState g_racebox_icon = IconState::SCANNING;
+IconState g_gopro_icon = IconState::SCANNING;
+IconState g_hr_icon = IconState::SCANNING;
+
+constexpr int64_t kSlowBlinkHalfPeriodUs = 500 * 1000;
+constexpr int64_t kFastBlinkHalfPeriodUs = 150 * 1000;
+
+bool icon_visible(IconState state, int64_t now) {
+    switch (state) {
+        case IconState::CONNECTED:
+            return true;
+        case IconState::CONNECTING:
+            return (now / kFastBlinkHalfPeriodUs) % 2 == 0;
+        case IconState::SCANNING:
+        default:
+            return (now / kSlowBlinkHalfPeriodUs) % 2 == 0;
+    }
+}
 
 // ---- low-level I2C / SSD1306 command helpers ------------------------------
 
@@ -89,6 +116,36 @@ void fill_rect(int x, int y, int w, int h) {
     }
 }
 
+// ---- 8x8 icon bitmaps -------------------------------------------------
+// One byte per row, MSB = leftmost column. Small hand-drawn glyphs (no font
+// library): a location dot for RaceBox (GPS lap timer), a camera for GoPro,
+// a heart for the heart rate monitor.
+constexpr uint8_t kIconRaceBox[8] = {0x3C, 0x7E, 0xFF, 0xFF, 0xFF, 0x7E, 0x3C, 0x18};
+constexpr uint8_t kIconGoPro[8] = {0x3C, 0x7E, 0xFF, 0xBD, 0xA5, 0xBD, 0xFF, 0x00};
+constexpr uint8_t kIconHeartRate[8] = {0x66, 0xFF, 0xFF, 0xFF, 0x7E, 0x3C, 0x18, 0x00};
+
+constexpr int kIconSize = 8;
+constexpr int kStatusDotSize = 4;
+constexpr int kIconY = 1;
+constexpr int kStatusDotY = kIconY + kIconSize + 2;
+
+void draw_bitmap8(int x, int y, const uint8_t rows[8]) {
+    for (int row = 0; row < kIconSize; ++row) {
+        for (int col = 0; col < kIconSize; ++col) {
+            if (rows[row] & (0x80 >> col)) {
+                fill_rect(x + col, y + row, 1, 1);
+            }
+        }
+    }
+}
+
+void draw_status_icon(int center_x, const uint8_t bitmap[8], IconState state, int64_t now) {
+    draw_bitmap8(center_x - kIconSize / 2, kIconY, bitmap);
+    if (icon_visible(state, now)) {
+        fill_rect(center_x - kStatusDotSize / 2, kStatusDotY, kStatusDotSize, kStatusDotSize);
+    }
+}
+
 // ---- 7-segment-style digit renderer ---------------------------------------
 // Segment bits: a=0 (top), b=1 (top-right), c=2 (bottom-right), d=3 (bottom),
 // e=4 (bottom-left), f=5 (top-left), g=6 (middle).
@@ -128,8 +185,16 @@ void draw_digit(int x, int y, uint8_t segments) {
     if (segments & kSegG) fill_rect(x + t, y + half - t / 2, w - 2 * t, t);   // middle
 }
 
-void render(bool valid, uint16_t bpm) {
+// Top strip is 16px tall (icon row + status dot row); the digit zone below
+// it fills the remaining height exactly (kDigitH == kHeight - kDigitZoneY).
+constexpr int kDigitZoneY = 16;
+
+void render(bool valid, uint16_t bpm, int64_t now) {
     clear_framebuffer();
+
+    draw_status_icon(24, kIconRaceBox, g_racebox_icon, now);
+    draw_status_icon(64, kIconGoPro, g_gopro_icon, now);
+    draw_status_icon(104, kIconHeartRate, g_hr_icon, now);
 
     char text[8];
     if (valid && bpm <= 999) {
@@ -143,12 +208,11 @@ void render(bool valid, uint16_t bpm) {
     const size_t count = strlen(text);
     const int total_w = static_cast<int>(count) * kDigitW + static_cast<int>(count - 1) * kDigitGap;
     int x = (kWidth - total_w) / 2;
-    const int y = (kHeight - kDigitH) / 2;
 
     for (size_t i = 0; i < count; ++i) {
         const char c = text[i];
         const uint8_t segments = (c == '-') ? kDashSegments : kDigitSegments[c - '0'];
-        draw_digit(x, y, segments);
+        draw_digit(x, kDigitZoneY, segments);
         x += kDigitW + kDigitGap;
     }
 }
@@ -199,6 +263,61 @@ void oled_display::init(int sda_gpio, int scl_gpio, uint8_t i2c_addr) {
     ESP_LOGI(kTag, "SSD1306 OLED ready on SDA=%d SCL=%d addr=0x%02X", sda_gpio, scl_gpio, i2c_addr);
 }
 
+namespace {
+
+IconState racebox_icon_state(RaceBoxState state) {
+    switch (state) {
+        case RaceBoxState::SCANNING:
+            return IconState::SCANNING;
+        case RaceBoxState::CONNECTING:
+            return IconState::CONNECTING;
+        case RaceBoxState::CONNECTED_IDLE:
+        case RaceBoxState::RECORDING:
+        case RaceBoxState::RECORDING_PAUSED:
+        case RaceBoxState::MEMORY_LOCKED:
+        default:
+            return IconState::CONNECTED;
+    }
+}
+
+IconState gopro_icon_state(conn_state_t conn) {
+    switch (conn) {
+        case CONN_STATE_SCANNING:
+            return IconState::SCANNING;
+        case CONN_STATE_CONNECTING:
+            return IconState::CONNECTING;
+        case CONN_STATE_READY:
+        default:
+            return IconState::CONNECTED;
+    }
+}
+
+} // namespace
+
+void oled_display::set_racebox_state(RaceBoxState state) {
+    const IconState icon = racebox_icon_state(state);
+    if (icon != g_racebox_icon) {
+        g_racebox_icon = icon;
+        g_dirty = true;
+    }
+}
+
+void oled_display::set_gopro_state(conn_state_t conn) {
+    const IconState icon = gopro_icon_state(conn);
+    if (icon != g_gopro_icon) {
+        g_gopro_icon = icon;
+        g_dirty = true;
+    }
+}
+
+void oled_display::set_heart_rate_connected(bool connected) {
+    const IconState icon = connected ? IconState::CONNECTED : IconState::SCANNING;
+    if (icon != g_hr_icon) {
+        g_hr_icon = icon;
+        g_dirty = true;
+    }
+}
+
 void oled_display::set_heart_rate(bool valid, uint16_t bpm) {
     if (valid != g_last_valid || bpm != g_last_bpm) {
         g_last_valid = valid;
@@ -217,7 +336,7 @@ void oled_display::tick() {
         return;
     }
 
-    render(g_last_valid, g_last_bpm);
+    render(g_last_valid, g_last_bpm, now);
     flush_framebuffer();
 
     g_dirty = false;
