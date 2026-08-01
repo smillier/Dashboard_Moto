@@ -10,9 +10,11 @@ SuperMini** board that runs three independent BLE-central roles at once:
 3. Connects to a standard **BLE Heart Rate Monitor** (chest strap / sports
    watch, GATT Heart Rate service `0x180D`) and shows the live bpm reading.
 
-RaceBox, GoPro and heart-rate-monitor connection status is shown on a
-**3-pixel WS2812 RGB bar** (pixel 0 = RaceBox, pixel 1 = GoPro, pixel 2 =
-heart rate monitor); the heart rate reading itself is shown as large digits
+RaceBox, GoPro and heart-rate-monitor connection status is shown on the
+first 3 pixels of a **10-pixel WS2812 RGB bar** (pixel 0 = RaceBox, pixel 1
+= GoPro, pixel 2 = heart rate monitor; pixels 3-9 are explicitly blanked
+each frame - unaddressed, they'd otherwise show stale/garbage data left
+over in the chain); the heart rate reading itself is shown as large digits
 (with small top-strip connection icons for all three devices) on a
 **0.96" SSD1306 128x64 I2C OLED**.
 
@@ -21,14 +23,14 @@ and [GoPro_ESP32C6_Remote](https://github.com/smillier/GoPro_ESP32C6_Remote)
 into one firmware. Both were already central-only NimBLE apps with no
 overlapping GPIOs, so the only real merge work was combining their two
 independent BLE scan loops into one shared scanner (only one `ble_gap_disc`
-can run at a time) and moving from a single-pixel status LED to a 3-pixel
-bar.
+can run at a time) and moving from a single-pixel status LED to a
+multi-pixel bar.
 
 ## Hardware
 
-| Function                            | GPIO |
-|---------------------------------------|------|
-| 3-LED WS2812 RGB bar (status)          | 8    |
+| Function                                | GPIO |
+|-------------------------------------------|------|
+| 10-LED WS2812 RGB bar (first 3 pixels used) | 8    |
 | RaceBox recording toggle (BOOT button) | 9    |
 | GoPro shutter (start/stop)             | 2    |
 | GoPro power / sleep                    | 3    |
@@ -38,15 +40,16 @@ bar.
 | OLED SCL (heart rate display)          | 19   |
 
 The RGB bar's data line replaces the SuperMini's onboard single WS2812 pad
-(GPIO8): it's the same protocol, just 3 pixels chained instead of 1. The
-OLED is wired to this board's silkscreen-labeled I2C pins (SDA=GPIO20,
-SCL=GPIO19) - I2C only needs 2 GPIOs, so no IO expander is needed even
-though the board is otherwise fairly pin-constrained. All pins are
-collision-free. Adjust `kRgbLedPin`/`kRgbLedCount`/`kOledSdaPin`/
+(GPIO8): it's the same protocol, just a longer chain (10 pixels instead of
+1). The OLED is wired to this board's silkscreen-labeled I2C pins
+(SDA=GPIO20, SCL=GPIO19) - I2C only needs 2 GPIOs, so no IO expander is
+needed even though the board is otherwise fairly pin-constrained. All pins
+are collision-free. Adjust `kRgbLedPin`/`kRgbLedCount`/`kOledSdaPin`/
 `kOledSclPin`/`kOledI2cAddr` in [`main/config.h`](main/config.h) if your
-wiring differs (some SSD1306 clones use I2C address `0x3D` instead of the
-default `0x3C` - if the display stays blank, that's the first thing to
-check).
+wiring differs - in particular, set `kRgbLedCount` to however many pixels
+your bar actually has (it must match the physical chain length, or the
+trailing pixels will show stale/garbage data instead of staying off; see
+"LED color code" below).
 
 ## Open and build
 
@@ -130,6 +133,10 @@ master driver (`driver` component), no extra dependency needed.
 |----------------------------------------|------------------|
 | Searching for the heart rate monitor   | Blue, slow blink |
 | Connected                              | Solid green      |
+
+**Pixels 3-9:** unused, always off. Explicitly set to black every frame
+(`status_led::tick()`) rather than left unaddressed, so they don't pick up
+stale/garbage data from the tail end of the WS2812 chain.
 
 ## Heart rate OLED
 

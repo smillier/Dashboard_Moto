@@ -193,5 +193,12 @@ void status_led::tick() {
     heart_rate_color(now, &r, &g, &b);
     led_strip_set_pixel(g_strip, kHeartRateLedIndex, r, g, b);
 
+    // Explicitly blank every pixel past the 3 meaningful ones - otherwise
+    // they're left unaddressed downstream in the WS2812 chain and can show
+    // stale/garbage data instead of staying off.
+    for (int i = kHeartRateLedIndex + 1; i < kRgbLedCount; ++i) {
+        led_strip_set_pixel(g_strip, i, 0, 0, 0);
+    }
+
     led_strip_refresh(g_strip);
 }
