@@ -51,6 +51,11 @@ your bar actually has (it must match the physical chain length, or the
 trailing pixels will show stale/garbage data instead of staying off; see
 "LED color code" below).
 
+## Enclosure
+
+[`Enclosure/dash.STL`](Enclosure/dash.STL) - 3D-printable case for mounting
+the board, LED bar, OLED and buttons on the dash.
+
 ## Open and build
 
 Native ESP-IDF project (target `esp32c6`), no Arduino/PlatformIO involved.
