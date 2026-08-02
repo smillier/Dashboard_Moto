@@ -1,4 +1,4 @@
-# Dashboard_CBR
+# Dashboard_Moto
 
 ESP-IDF (`idf.py`, target `esp32c6`) firmware for a single **ESP32-C6
 SuperMini** board that runs three independent BLE-central roles at once:
