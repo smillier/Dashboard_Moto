@@ -8,13 +8,11 @@
 
 static const char *TAG = "buttons";
 
-/* GPIO2/3/4/18 are general-purpose-safe pins on the ESP32-C6 Super
- * Mini (no bootstrapping/flash conflicts). Distinct from the
- * RaceBox BOOT button (GPIO9, config.h's kRaceBoxButtonPin). */
+/* GPIO2 is a general-purpose-safe pin on the ESP32-C6 Super Mini (no
+ * bootstrapping/flash conflicts). Distinct from the RaceBox BOOT button
+ * (GPIO9, config.h's kRaceBoxButtonPin) and the HAT's KEY1/2/3 and
+ * joystick (hat_input.c). */
 #define BUTTON_SHUTTER GPIO_NUM_2
-#define BUTTON_POWER   GPIO_NUM_3
-#define BUTTON_MODE    GPIO_NUM_4
-#define BUTTON_RESET   GPIO_NUM_18
 
 static QueueHandle_t s_evt_queue;
 
@@ -60,16 +58,6 @@ static void button_task(void *arg)
         case BUTTON_SHUTTER:
             gopro_control_toggle_shutter();
             break;
-        case BUTTON_POWER:
-            gopro_control_power_button();
-            break;
-        case BUTTON_MODE:
-            gopro_control_cycle_mode();
-            break;
-        case BUTTON_RESET:
-            ESP_LOGW(TAG, "Physical reset button pressed");
-            gopro_control_reset_device();
-            break;
         default:
             break;
         }
@@ -95,11 +83,7 @@ void buttons_init(void)
 
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
     configure_button(BUTTON_SHUTTER);
-    configure_button(BUTTON_POWER);
-    configure_button(BUTTON_MODE);
-    configure_button(BUTTON_RESET);
 
     xTaskCreate(button_task, "buttons", 3072, NULL, 5, NULL);
-    ESP_LOGI(TAG, "Buttons ready: GPIO%d=shutter GPIO%d=power GPIO%d=mode GPIO%d=reset",
-             BUTTON_SHUTTER, BUTTON_POWER, BUTTON_MODE, BUTTON_RESET);
+    ESP_LOGI(TAG, "Buttons ready: GPIO%d=shutter", BUTTON_SHUTTER);
 }

@@ -11,8 +11,9 @@
 #include "buttons.h"
 #include "config.h"
 #include "gopro_ble.h"
+#include "hat_input.h"
 #include "heart_rate_ble.h"
-#include "oled_display.h"
+#include "lcd_display.h"
 #include "racebox_ble.h"
 #include "status_led.h"
 #include "version.h"
@@ -45,11 +46,13 @@ extern "C" void app_main(void) {
 
     init_nvs();
     init_racebox_button();
-    buttons_init();     // GoPro's GPIO2/3/4/18, ISR-driven, own task
+    buttons_init();     // GoPro shutter, GPIO2, ISR-driven, own task
+    hat_input_init();   // LCD HAT joystick + KEY1/2/3, ISR-driven, own task
     app_state_init();   // GoPro's shared conn/recording/mode state
 
     status_led::init(kRgbLedPin, kRgbLedCount);
-    oled_display::init(kOledSdaPin, kOledSclPin, kOledI2cAddr);
+    lcd_display::init(kLcdSclkPin, kLcdMosiPin, kLcdCsPin, kLcdDcPin, kLcdRstPin, kLcdBlPin,
+                       kLcdSpiClockHz);
 
     // Starts the shared NimBLE host + scan; racebox_ble, gopro_ble and
     // heart_rate_ble take over their own connection's GAP events once the
@@ -65,14 +68,10 @@ extern "C" void app_main(void) {
         status_led::set_heart_rate_connected(heart_rate_ble_is_connected());
         status_led::tick();
 
-        oled_display::set_racebox_state(racebox_ble::state());
-        oled_display::set_gopro_state(app_state_get_conn());
-        oled_display::set_heart_rate_connected(heart_rate_ble_is_connected());
-
         uint16_t bpm = 0;
         const bool hr_valid = heart_rate_ble_get_bpm(&bpm);
-        oled_display::set_heart_rate(hr_valid, bpm);
-        oled_display::tick();
+        lcd_display::set_heart_rate(hr_valid, bpm);
+        lcd_display::tick();
 
         const bool pressed = gpio_get_level(static_cast<gpio_num_t>(kRaceBoxButtonPin)) == 0;
         const int64_t now = esp_timer_get_time();

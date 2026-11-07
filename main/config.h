@@ -56,15 +56,38 @@ inline constexpr int kGoProLedIndex = 1;
 inline constexpr int kHeartRateLedIndex = 2;
 
 // ---------------------------------------------------------------------
-// Heart rate OLED
+// Heart rate LCD + joystick/buttons (Waveshare 1.44" LCD HAT, ST7735S)
 // ---------------------------------------------------------------------
 
-// 0.96" SSD1306 128x64 I2C OLED. Wired to this board's silkscreen-labeled
-// I2C pins (SDA/SCL), which are otherwise unused - no IO expander needed,
-// I2C only takes 2 GPIOs.
-inline constexpr int kOledSdaPin = 20;
-inline constexpr int kOledSclPin = 19;
-// Default address for this module; some clones ship at 0x3D instead - check
-// yours if the display stays blank.
-inline constexpr uint8_t kOledI2cAddr = 0x3C;
-inline constexpr uint32_t kOledI2cFreqHz = 400000;
+// This is a Raspberry Pi HAT (2x20 header), hand-wired here rather than
+// plugged in - see README for the full pinout table. Replaces the SSD1306
+// heart-rate OLED and the GPIO18 physical reset button.
+//
+// All 14 signals below were chosen from the SuperMini's free GPIOs that are
+// *not* strapping pins (strapping pins on this chip: GPIO4/5/8/9/15), so
+// none of this wiring can glitch boot mode selection even if a button is
+// held down at power-on.
+
+// -- Display (4-wire SPI, 128x128) --
+inline constexpr int kLcdSclkPin = 18;
+inline constexpr int kLcdMosiPin = 19;
+inline constexpr int kLcdCsPin = 20;
+inline constexpr int kLcdDcPin = 21;
+inline constexpr int kLcdRstPin = 22;
+inline constexpr int kLcdBlPin = 23; // backlight, driven HIGH (no PWM dimming yet)
+inline constexpr int kLcdSpiClockHz = 10 * 1000 * 1000; // matches Waveshare's own reference driver
+
+// -- 5-way joystick --
+inline constexpr int kJoyUpPin = 0;
+inline constexpr int kJoyDownPin = 1;
+inline constexpr int kJoyLeftPin = 6;
+inline constexpr int kJoyRightPin = 7;
+inline constexpr int kJoyPressPin = 14;
+
+// -- KEY1/2/3 --
+// KEY1 replaces the old GPIO18 physical reset button. KEY2/KEY3 and the
+// joystick directions are wired and debounced but not bound to any action
+// yet - reserved for a future on-screen menu.
+inline constexpr int kHatKey1Pin = 16; // -> device reset
+inline constexpr int kHatKey2Pin = 17; // reserved
+inline constexpr int kHatKey3Pin = 3;  // reserved

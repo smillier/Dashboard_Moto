@@ -3,7 +3,7 @@ idf_component_register(
         "main.cpp"
         "ble_manager.cpp"
         "status_led.cpp"
-        "oled_display.cpp"
+        "lcd_display.cpp"
         "racebox_ble.cpp"
         "ubx_protocol.cpp"
         "gopro_ble.c"
@@ -11,6 +11,7 @@ idf_component_register(
         "heart_rate_ble.c"
         "app_state.c"
         "buttons.c"
+        "hat_input.cpp"
     INCLUDE_DIRS "."
-    REQUIRES bt driver esp_driver_i2c esp_timer nvs_flash
+    REQUIRES bt driver esp_timer nvs_flash
 )
