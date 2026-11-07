@@ -44,13 +44,16 @@ inline constexpr int64_t kRaceBoxButtonDebounceUs = 250 * 1000;
 // Status LED bar
 // ---------------------------------------------------------------------
 
-// 2-pixel WS2812 addressable RGB bar, data line on GPIO8 (the SuperMini's
-// onboard WS2812 pad). Pixel 0 reflects RaceBoxState, pixel 1 reflects the
-// GoPro connection/recording state.
+// 10-pixel WS2812 addressable RGB bar, data line on GPIO8. Only the first 3
+// pixels are meaningful (0 = RaceBoxState, 1 = GoPro connection/recording
+// state, 2 = heart rate monitor's BLE connection state); status_led::tick()
+// explicitly blanks the remaining ones each frame so they don't show
+// stale/garbage data from being left unaddressed downstream in the chain.
 inline constexpr int kRgbLedPin = 8;
-inline constexpr int kRgbLedCount = 2;
+inline constexpr int kRgbLedCount = 10;
 inline constexpr int kRaceBoxLedIndex = 0;
 inline constexpr int kGoProLedIndex = 1;
+inline constexpr int kHeartRateLedIndex = 2;
 
 // ---------------------------------------------------------------------
 // Heart rate LCD + joystick/buttons (Waveshare 1.44" LCD HAT, ST7735S)

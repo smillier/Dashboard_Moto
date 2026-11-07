@@ -88,7 +88,12 @@ static int hr_on_chr_disc(uint16_t conn_handle, const struct ble_gatt_error *err
         return 0;
     }
 
-    int rc = ble_gattc_disc_all_dscs(s_conn_handle, s_hrm_val_handle + 1, s_svc_end_handle, hr_on_dsc_disc, NULL);
+    /* ble_gattc_disc_all_dscs's start_handle is the characteristic VALUE
+     * handle itself (NimBLE starts the real ATT search at start_handle+1
+     * internally) - passing val_handle+1 here would skip straight past the
+     * CCCD, which normally sits at val_handle+1, and search from
+     * val_handle+2 instead. */
+    int rc = ble_gattc_disc_all_dscs(s_conn_handle, s_hrm_val_handle, s_svc_end_handle, hr_on_dsc_disc, NULL);
     if (rc != 0) {
         ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
     }
@@ -202,6 +207,16 @@ static void handle_hrm_notification(const uint8_t *data, uint16_t len)
     } else {
         s_bpm = data[1];
     }
+
+    // Log only on change (notifications typically arrive ~1/s and often
+    // repeat the same value) so this stays useful in the serial monitor
+    // without spamming it.
+    static uint16_t s_last_logged_bpm = 0;
+    if (!s_bpm_valid || s_bpm != s_last_logged_bpm) {
+        ESP_LOGI(TAG, "Heart rate: %u bpm", (unsigned)s_bpm);
+        s_last_logged_bpm = s_bpm;
+    }
+
     s_bpm_valid = true;
 }
 
@@ -215,6 +230,10 @@ static int hr_gap_event(struct ble_gap_event *event, void *arg)
             ESP_LOGI(TAG, "Connected. Discovering Heart Rate service...");
             s_conn_handle = event->connect.conn_handle;
             s_bpm_valid = false;
+            // Connecting to this peer cancelled the shared scan; resume it
+            // now so the RaceBox/GoPro scan keeps going independently of
+            // this heart-rate-monitor connection's own progress.
+            ble_manager_resume_scan_if_needed();
             hr_start_discovery();
         } else {
             ESP_LOGE(TAG, "Connection failed, status=%d", event->connect.status);

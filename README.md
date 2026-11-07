@@ -1,4 +1,4 @@
-# Dashboard_CBR
+# Dashboard_Moto
 
 ESP-IDF (`idf.py`, target `esp32c6`) firmware for a single **ESP32-C6
 SuperMini** board that runs three independent BLE-central roles at once:
@@ -10,9 +10,12 @@ SuperMini** board that runs three independent BLE-central roles at once:
 3. Connects to a standard **BLE Heart Rate Monitor** (chest strap / sports
    watch, GATT Heart Rate service `0x180D`) and shows the live bpm reading.
 
-RaceBox and GoPro status is shown on a **2-pixel WS2812 RGB bar** (pixel 0 =
-RaceBox, pixel 1 = GoPro); heart rate is shown as large digits on a
-**Waveshare 1.44" LCD HAT (ST7735S, 128x128, 4-wire SPI)**, whose 5-way
+RaceBox, GoPro and heart-rate-monitor connection status is shown on the
+first 3 pixels of a **10-pixel WS2812 RGB bar** (pixel 0 = RaceBox, pixel 1
+= GoPro, pixel 2 = heart rate monitor; pixels 3-9 are explicitly blanked
+each frame - unaddressed, they'd otherwise show stale/garbage data left
+over in the chain); the heart rate reading itself is shown as large digits
+on a **Waveshare 1.44" LCD HAT (ST7735S, 128x128, 4-wire SPI)**, whose 5-way
 joystick and KEY1/2/3 also provide the device's reset button (KEY1) and
 inputs reserved for a future on-screen menu.
 
@@ -21,8 +24,8 @@ and [GoPro_ESP32C6_Remote](https://github.com/smillier/GoPro_ESP32C6_Remote)
 into one firmware. Both were already central-only NimBLE apps with no
 overlapping GPIOs, so the only real merge work was combining their two
 independent BLE scan loops into one shared scanner (only one `ble_gap_disc`
-can run at a time) and moving from a single-pixel status LED to a 2-pixel
-bar.
+can run at a time) and moving from a single-pixel status LED to a
+multi-pixel bar.
 
 The GoPro's power/sleep and mode-cycle buttons, and the heart-rate SSD1306
 OLED, were dropped in favor of the LCD HAT: the HAT alone needs 14 GPIOs
@@ -32,9 +35,9 @@ pin budget.
 
 ## Hardware
 
-| Function                            | GPIO |
-|---------------------------------------|------|
-| 2-LED WS2812 RGB bar (status)          | 8    |
+| Function                                | GPIO |
+|-------------------------------------------|------|
+| 10-LED WS2812 RGB bar (first 3 pixels used) | 8    |
 | RaceBox recording toggle (BOOT button) | 9    |
 | GoPro shutter (start/stop)             | 2    |
 | LCD SCLK                               | 18   |
@@ -53,7 +56,11 @@ pin budget.
 | KEY3 (reserved)                        | 3    |
 
 The RGB bar's data line replaces the SuperMini's onboard single WS2812 pad
-(GPIO8): it's the same protocol, just 2 pixels chained instead of 1.
+(GPIO8): it's the same protocol, just a longer chain (10 pixels instead of
+1). Set `kRgbLedCount` in [`main/config.h`](main/config.h) to however many
+pixels your bar actually has (it must match the physical chain length, or
+the trailing pixels will show stale/garbage data instead of staying off; see
+"LED color code" below).
 
 The LCD is a [Waveshare 1.44" LCD HAT](https://www.waveshare.com/1.44inch-lcd-hat.htm)
 - a Raspberry Pi HAT (2x20 header), not a native ESP32 module, so it's
@@ -66,6 +73,11 @@ do sit on strapping pins (GPIO9/GPIO8) but were already proven safe by the
 original projects this merges. All pins are collision-free. Adjust the `kLcd*`/
 `kJoy*`/`kHatKey*` constants in [`main/config.h`](main/config.h) if your
 wiring differs.
+
+## Enclosure
+
+[`Enclosure/dash.STL`](Enclosure/dash.STL) - 3D-printable case for mounting
+the board, LED bar, LCD HAT and buttons on the dash.
 
 ## Open and build
 
@@ -94,9 +106,14 @@ master driver (`driver` component), no extra dependency needed.
   `heart_rate_ble_matches()` (service `0x180D`); whichever matches gets
   connected, and that connection's GAP events (GATT discovery,
   subscription, bonding, disconnect) are then handled entirely by that
-  device's own module. The scan resumes automatically whenever a connection
-  attempt fails or a device disconnects, and stops once all three are
-  connected.
+  device's own module. Only one scan can run at a time, so it's cancelled
+  the instant any advertisement matches; it's then resumed immediately once
+  that connection attempt finishes (success or failure), so the other two
+  peers keep being searched for independently of whether this one is
+  present. The scan resumes automatically whenever a connection attempt
+  finishes, fails, or a device disconnects, and stops once all three are
+  connected - so any subset of the three devices being absent or slow to
+  appear never blocks the others from connecting.
 - **RaceBox**: once connected, subscribes to the UART service and queries
   recording status (`0xFF 0x22`), unlocking memory security if configured
   (`0xFF 0x30`). The BOOT button toggles recording (`0xFF 0x25`); state
@@ -116,7 +133,9 @@ master driver (`driver` component), no extra dependency needed.
   characteristic (`0x2A37`) - no bonding needed. Each notification is
   parsed per the GATT Heart Rate Measurement format (bpm value, either
   8-bit or 16-bit depending on a flag byte); energy-expended and
-  RR-interval fields, if present, are parsed past but not used.
+  RR-interval fields, if present, are parsed past but not used. Each new
+  bpm value is also logged (`heart_rate_ble: Heart rate: N bpm`) so it can
+  be watched live over `idf.py monitor` without needing the OLED.
 
 ## LED color code
 
@@ -139,6 +158,17 @@ master driver (`driver` component), no extra dependency needed.
 | Connected, bonding/discovery in progress | Solid yellow |
 | Ready                      | Solid green            |
 | Recording in progress      | Red, blinking (overrides connection color) |
+
+**Pixel 2 - Heart rate monitor:**
+
+| State                                | Color / pattern |
+|----------------------------------------|------------------|
+| Searching for the heart rate monitor   | Blue, slow blink |
+| Connected                              | Solid green      |
+
+**Pixels 3-9:** unused, always off. Explicitly set to black every frame
+(`status_led::tick()`) rather than left unaddressed, so they don't pick up
+stale/garbage data from the tail end of the WS2812 chain.
 
 ## Heart rate LCD
 
@@ -188,7 +218,8 @@ shifted, mirrored, or the colors look off, `kColOffset`/`kRowOffset`/the
   notify on `0x2A37` isn't handled (no bonding is requested for this
   connection). Most consumer chest straps (Polar, Wahoo, etc.) don't
   require this.
-- All three devices connect sequentially (whichever advertises first), not
-  concurrently - the shared scanner cancels scanning while a connection is
-  being established, matching how each original project already behaved
-  for its single peer.
+- Only one BLE scan can run at a time, so it's briefly cancelled while each
+  connection attempt is in progress - but it resumes immediately once that
+  attempt finishes (success or failure), so all three devices still connect
+  independently of each other and of the order they advertise in (see
+  "How it works" above).
